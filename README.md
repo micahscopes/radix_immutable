@@ -5,6 +5,10 @@ Rust Radix Trie
 
 This is a [Radix Trie][radix-wiki] implementation in Rust, building on the lessons learnt from `TrieMap` and [Sequence Trie][seq-trie]. You can read about my experience implementing this data structure [here][radix-paper].
 
+The crate provides two variants:
+1. A classic mutable radix trie implementation
+2. An immutable radix trie with structural sharing and fast prefix views for efficient comparison
+
 # Help Wanted, Enquire Within
 
 *Since writing this code I haven't used it in anger (or production) so it is no doubt in need of some maintenance, testing and optimisation love. If you would like to help out, try solving an open issue, optimise something, or just have a poke around! Thanks :)*
@@ -15,6 +19,9 @@ This is a [Radix Trie][radix-wiki] implementation in Rust, building on the lesso
 * Trie-specific methods to look-up closest ancestors and descendants.
 * Key Generic. Any type that can be serialised as a vector of bytes can be used as a key.
 * Safe - no unsafe code.
+* Immutable implementation with structural sharing for efficient versioning.
+* Fast structural hashing for subtree comparison.
+* Prefix views for efficiently comparing subtries.
 
 # Documentation
 
@@ -27,6 +34,7 @@ Available on [Crates.io][] as [`radix_trie`][radix-crate].
 Just add `radix_trie` to the dependencies section of your `Cargo.toml`, like so:
 
 ```toml
+# Basic usage
 radix_trie = "0.2"
 ```
 

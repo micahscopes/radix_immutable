@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 /// by the `Trie` type. Each node contains a key fragment, an optional value,
 /// and a map of children.
 #[derive(Debug)]
-pub(crate) struct TrieNode<K, V> {
+pub struct TrieNode<K, V> {
     /// The key fragment stored at this node (as a sequence of bytes)
     pub key_fragment: Vec<u8>,
     

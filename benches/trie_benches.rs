@@ -19,7 +19,7 @@ fn get_text() -> Vec<String> {
 fn make_trie(words: &[String]) -> Trie<&str, usize> {
     let mut trie = Trie::new();
     for w in words {
-        trie.insert(&w[..], w.len());
+        trie = trie.insert(&w[..], w.len())
     }
     trie
 }
@@ -49,7 +49,7 @@ fn trie_insert_remove(b: &mut Criterion) {
         b.iter(|| {
             let mut trie = make_trie(&words);
             for w in &words {
-                trie.remove(&&w[..]);
+                (trie, _) = trie.remove(&&w[..]);
             }
         });
     });

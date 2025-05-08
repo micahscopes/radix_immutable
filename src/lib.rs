@@ -28,7 +28,7 @@
 //! assert_eq!(trie.get(&"hello".to_string()), Some(&1));
 //! ```
 
-mod node;
+pub mod node;
 mod prefix_view;
 mod trie;
 mod util;
@@ -36,6 +36,7 @@ mod util;
 // Re-export public types
 pub use crate::prefix_view::PrefixView;
 pub use crate::trie::Trie;
+pub use crate::node::TrieNode;
 
 /// Errors that can occur in the trie operations
 #[derive(Debug, Clone, PartialEq, Eq)]
