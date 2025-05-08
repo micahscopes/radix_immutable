@@ -1,79 +1,58 @@
-//! A wonderful, fast, safe, generic radix trie implementation.
+//! # Radix Trie
 //!
-//! To get started, see the docs for `Trie` below.
+//! A radix trie implementation with structural sharing and fast prefix comparison.
+//!
+//! This crate provides an immutable radix trie (also known as a patricia trie) that uses structural
+//! sharing via `Arc` to efficiently create new versions of the trie while sharing unchanged parts.
+//!
+//! ## Features
+//!
+//! - **Immutable API**: All modifying operations return a new trie instance
+//! - **Structural Sharing**: Efficient memory usage through shared unchanged subtrees
+//! - **Fast Prefix Comparison**: Compare subtrees efficiently using structural hashing
+//! - **Prefix Views**: Create lightweight views into trie prefixes
+//!
+//! ## Example
+//!
+//! ```rust
+//! use radix_trie::Trie;
+//!
+//! // Create a new trie
+//! let trie = Trie::<String, u32>::new();
+//!
+//! // Insert some values (each operation returns a new trie)
+//! let trie = trie.insert("hello".to_string(), 1);
+//! let trie = trie.insert("world".to_string(), 2);
+//!
+//! // Lookup values
+//! assert_eq!(trie.get(&"hello".to_string()), Some(&1));
+//! ```
 
-// #![warn(missing_docs)]
-
-extern crate endian_type;
-extern crate nibble_vec;
-#[cfg(test)]
-extern crate quickcheck;
-#[cfg(test)]
-extern crate rand;
-
-pub use keys::TrieKey;
-pub use nibble_vec::NibbleVec;
-pub use trie_common::TrieCommon;
-use trie_node::TrieNode;
-
-use nibble_vec::Nibblet;
-
-#[macro_use]
-mod macros;
-pub mod iter;
-mod keys;
-#[cfg(feature = "serde")]
-mod serde;
-mod subtrie;
-mod traversal;
+mod node;
+mod prefix_view;
 mod trie;
-mod trie_common;
-mod trie_node;
+mod util;
 
-#[cfg(test)]
-mod qc_test;
-#[cfg(test)]
-mod test;
+// Re-export public types
+pub use crate::prefix_view::PrefixView;
+pub use crate::trie::Trie;
 
-const BRANCH_FACTOR: usize = 16;
-
-/// Data-structure for storing and querying string-like keys and associated values.
-///
-/// Any keys which share a common *prefix* are stored below a single copy of that prefix.
-/// This saves space, and also allows the longest prefix of any given key to be found.
-///
-/// You can read more about Radix Tries on [Wikipedia][radix-wiki].
-///
-/// Lots of the methods on `Trie` return optional values - they can be composed
-/// nicely using `Option::and_then`.
-///
-/// [radix-wiki]: http://en.wikipedia.org/wiki/Radix_tree
-#[derive(Debug, Clone)]
-pub struct Trie<K, V> {
-    /// The number of values stored in this sub-trie (this node and all descendants).
-    length: usize,
-    /// The main content of this trie.
-    node: TrieNode<K, V>,
+/// Errors that can occur in the trie operations
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Error {
+    /// Key is invalid for the operation
+    InvalidKey,
+    /// Other error with description
+    Other(String),
 }
 
-/// Immutable view of a sub-tree a larger trie.
-#[derive(Debug)]
-pub struct SubTrie<'a, K: 'a, V: 'a> {
-    prefix: Nibblet,
-    node: &'a TrieNode<K, V>,
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::InvalidKey => write!(f, "Invalid key for this operation"),
+            Error::Other(msg) => write!(f, "{}", msg),
+        }
+    }
 }
 
-/// Mutable view of a sub-tree of a larger trie.
-#[derive(Debug)]
-pub struct SubTrieMut<'a, K: 'a, V: 'a> {
-    prefix: Nibblet,
-    length: &'a mut usize,
-    node: &'a mut TrieNode<K, V>,
-}
-
-/// Wrapper for subtrie lookup results.
-///
-/// When fetching from a subtrie, if the prefix is wrong you'll get an `Err(())`.
-/// Otherwise you'll get an `Ok(_)`, where the contained option value is what would ordinarily
-/// be returned by get/insert/whatever.
-pub type SubTrieResult<T> = Result<Option<T>, ()>;
+impl std::error::Error for Error {}
