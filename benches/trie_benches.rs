@@ -26,6 +26,7 @@ fn make_trie(words: &[String]) -> StrTrie<usize> {
 
 fn trie_insert(b: &mut Criterion) {
     let words = get_text();
+    println!("Benchmarking with {} words", words.len());
     b.bench_function("trie insert", |b| b.iter(|| make_trie(&words)));
 }
 

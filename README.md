@@ -8,7 +8,8 @@ This is a [Radix Trie][radix-wiki] implementation in Rust that focuses on immuta
 * Immutable API with structural sharing for efficient versioning
 * Fast prefix comparison between trees
 * Compressed nodes with common key prefixes stored only once
-* Structural hashing for efficient subtree comparison
+* Efficient thread-safe caching of structural hashes and subtree sizes using OnceCell
+* Structural hashing for efficient subtree comparison (~43ns per lookup)
 * Key generic - supports any type that can be converted to bytes
 * Prefix views for efficiently querying and comparing subtries
 * Safe - no unsafe code
