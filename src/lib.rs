@@ -10,7 +10,7 @@
 //! - **Immutable API**: All modifying operations return a new trie instance
 //! - **Structural Sharing**: Efficient memory usage through shared unchanged subtrees
 //! - **Fast Prefix Comparison**: Compare subtrees efficiently using structural hashing
-//! - **Prefix Views**: Create lightweight views into trie prefixes
+//! - **Prefix Views**: Create lightweight views into trie prefixes with fast comparison and lookup support
 //!
 //! ## Example
 //!
@@ -38,7 +38,28 @@ pub use crate::prefix_view::PrefixView;
 pub use crate::trie::Trie;
 pub use crate::node::TrieNode;
 
-/// Errors that can occur in the trie operations
+/// PrefixView provides efficient views of subtries based on key prefixes.
+/// This enables fast comparison between subtries with the same prefix, as well
+/// as key lookups and existence checks.
+///
+/// ```rust
+/// use radix_trie::Trie;
+///
+/// let trie = Trie::<String, u32>::new()
+///     .insert("hello".to_string(), 1)
+///     .insert("help".to_string(), 2);
+///
+/// // Create a view of the "hel" prefix
+/// let view = trie.view_subtrie("hel".to_string());
+///
+/// // Check if a key exists in the view
+/// assert!(view.contains_key(&"hello".to_string()));
+/// 
+/// // Get a value from the view
+/// assert_eq!(view.get(&"hello".to_string()), Some(&1));
+/// ```
+///
+/// Errors that can occur in trie operations
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     /// Key is invalid for the operation

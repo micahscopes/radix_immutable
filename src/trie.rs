@@ -92,10 +92,13 @@ impl<K, V> Trie<K, V> {
     }
 }
 
+
+
 impl<K: AsRef<[u8]>, V> Trie<K, V> {
     /// Creates a view of the subtrie at the given key prefix.
     ///
-    /// This allows for efficient comparison of subtries.
+    /// This method returns a lightweight view into a subtrie defined by a key prefix.
+    /// The view supports efficient comparison and lookup operations on the subtrie.
     ///
     /// # Examples
     ///
@@ -106,7 +109,14 @@ impl<K: AsRef<[u8]>, V> Trie<K, V> {
     ///     .insert("hello".to_string(), 1)
     ///     .insert("help".to_string(), 2);
     ///
+    /// // Create a view of the subtrie at "hel" prefix
     /// let view = trie.view_subtrie("hel".to_string());
+    ///
+    /// // Check if keys exist in the view
+    /// assert!(view.contains_key(&"hello".to_string()));
+    ///
+    /// // Get values from the view
+    /// assert_eq!(view.get(&"hello".to_string()), Some(&1));
     /// ```
     pub fn view_subtrie(&self, prefix: K) -> PrefixView<K, V> 
     where 

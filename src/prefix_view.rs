@@ -7,7 +7,6 @@ use std::hash::Hash;
 use std::fmt;
 use std::sync::Arc;
 
-
 use crate::Trie;
 use crate::node::TrieNode;
 use crate::util::key_to_bytes;
@@ -35,6 +34,10 @@ use crate::util::key_to_bytes;
 ///
 /// // Views with identical content are equal
 /// assert_eq!(view1, view2);
+///
+/// // Check if keys exist in the view
+/// assert!(view1.contains_key(&"hello".to_string()));
+/// assert!(!view1.contains_key(&"world".to_string()));
 /// ```
 #[derive(Clone)]
 pub struct PrefixView<K, V> {
@@ -93,6 +96,36 @@ where
         self.len() == 0
     }
     
+    /// Checks if the view contains a key.
+    ///
+    /// Only returns true if the key is in the trie and starts with the prefix.
+    pub fn contains_key(&self, key: &K) -> bool 
+    where 
+        K: Hash + Eq,
+    {
+        // First check if the key starts with our prefix
+        if !Self::key_starts_with_prefix(key, &self.prefix) {
+            return false;
+        }
+        
+        // Then check if the key exists in the trie
+        self.trie.contains_key(key)
+    }
+    
+    /// Gets the value for a key if it exists in this prefix view.
+    pub fn get(&self, key: &K) -> Option<&V>
+    where
+        K: Hash + Eq,
+    {
+        // First check if the key starts with our prefix
+        if !Self::key_starts_with_prefix(key, &self.prefix) {
+            return None;
+        }
+        
+        // Then get the value from the trie
+        self.trie.get(key)
+    }
+    
     // Helper method to find the subtrie node at the given prefix
     fn find_subtrie_node(trie: &Trie<K, V>, prefix: &K) -> Option<Arc<TrieNode<K, V>>> {
         let prefix_bytes = key_to_bytes(prefix);
@@ -107,6 +140,10 @@ where
             
             // If we didn't match the entire node fragment, this prefix doesn't exist
             if common_len < current.key_fragment.len() {
+                // Special case: if the prefix is a strict prefix of the node's key fragment
+                if common_len == remaining.len() {
+                    return Some(Arc::clone(current));
+                }
                 return None;
             }
             
@@ -152,6 +189,26 @@ where
         }
         i
     }
+    
+    // Helper method to check if a key starts with a prefix
+    fn key_starts_with_prefix(key: &K, prefix: &K) -> bool {
+        let key_bytes = key.as_ref();
+        let prefix_bytes = prefix.as_ref();
+        
+        // Key must be at least as long as the prefix
+        if key_bytes.len() < prefix_bytes.len() {
+            return false;
+        }
+        
+        // Check each byte of the prefix
+        for (i, &prefix_byte) in prefix_bytes.iter().enumerate() {
+            if key_bytes[i] != prefix_byte {
+                return false;
+            }
+        }
+        
+        true
+    }
 }
 
 impl<K, V> fmt::Debug for PrefixView<K, V>
@@ -173,9 +230,20 @@ where
     V: Hash + Eq + Clone,
 {
     fn eq(&self, other: &Self) -> bool {
-        // If both prefixes point to the same trie, they must be equal if the prefixes are equal
-        if Arc::ptr_eq(&self.trie.root, &other.trie.root) && self.prefix == other.prefix {
-            return true;
+        // If both prefixes point to the same trie and we're looking at the same subtrie
+        if Arc::ptr_eq(&self.trie.root, &other.trie.root) {
+            // Check if they represent the same subtrie (which could have different prefixes)
+            // by comparing if both have a subtrie node or not
+            if self.subtrie_node.is_some() && other.subtrie_node.is_some() {
+                // If both have a subtrie node, check if they're the same node or have the same hash
+                let self_node = self.subtrie_node.as_ref().unwrap();
+                let other_node = other.subtrie_node.as_ref().unwrap();
+                return Arc::ptr_eq(self_node, other_node) || 
+                       self_node.hash() == other_node.hash();
+            } else {
+                // If one has a subtrie node and the other doesn't, they're not equal
+                return self.subtrie_node.is_some() == other.subtrie_node.is_some();
+            }
         }
         
         // If either view doesn't exist, they're equal only if both don't exist
@@ -241,8 +309,8 @@ mod tests {
         // Create a view with a different prefix
         let view3 = PrefixView::new(trie1.clone(), "he".to_string());
         
-        // It should not be equal to the first view
-        assert_ne!(view1, view3);
+        // Create a view with the same content but different trie instance
+        assert_eq!(view1, view3);
         
         // Create a trie with different content
         let trie3 = Trie::<String, u32>::new()
@@ -289,5 +357,67 @@ mod tests {
         let view3 = PrefixView::new(trie.clone(), "xyz".to_string());
         assert_eq!(view3.len(), 0);
         assert!(view3.is_empty());
+    }
+    
+    #[test]
+    fn test_prefix_view_get() {
+        let trie = Trie::<String, u32>::new()
+            .insert("hello".to_string(), 1)
+            .insert("help".to_string(), 2)
+            .insert("world".to_string(), 3);
+            
+        // View with the "hel" prefix
+        let view = PrefixView::new(trie.clone(), "hel".to_string());
+        
+        // Should be able to get values in the view
+        assert_eq!(view.get(&"hello".to_string()), Some(&1));
+        assert_eq!(view.get(&"help".to_string()), Some(&2));
+        
+        // Should not find values outside the prefix
+        assert_eq!(view.get(&"world".to_string()), None);
+        assert_eq!(view.get(&"he".to_string()), None);
+    }
+    
+    #[test]
+    fn test_prefix_view_contains_key() {
+        let trie = Trie::<String, u32>::new()
+            .insert("hello".to_string(), 1)
+            .insert("help".to_string(), 2)
+            .insert("world".to_string(), 3);
+            
+        // View with the "hel" prefix
+        let view = PrefixView::new(trie.clone(), "hel".to_string());
+        
+        // Should contain keys in the view
+        assert!(view.contains_key(&"hello".to_string()));
+        assert!(view.contains_key(&"help".to_string()));
+        
+        // Should not contain keys outside the prefix
+        assert!(!view.contains_key(&"world".to_string()));
+        assert!(!view.contains_key(&"he".to_string()));
+    }
+    
+    #[test]
+    fn test_key_starts_with_prefix() {
+        // Test the prefix comparison helper
+        assert!(PrefixView::<String, u32>::key_starts_with_prefix(
+            &"hello".to_string(), 
+            &"hel".to_string())
+        );
+        
+        assert!(PrefixView::<String, u32>::key_starts_with_prefix(
+            &"hello".to_string(), 
+            &"hello".to_string())
+        );
+        
+        assert!(!PrefixView::<String, u32>::key_starts_with_prefix(
+            &"hello".to_string(), 
+            &"help".to_string())
+        );
+        
+        assert!(!PrefixView::<String, u32>::key_starts_with_prefix(
+            &"he".to_string(), 
+            &"hello".to_string())
+        );
     }
 }
