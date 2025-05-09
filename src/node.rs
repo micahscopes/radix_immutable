@@ -108,9 +108,10 @@ impl<K, V> TrieNode<K, V> {
     
     /// Clears the cached hash, forcing it to be recalculated next time it's needed
     pub fn invalidate_hash_cache(&self) {
-        if let Ok(mut cache) = self.cached_hash.lock() {
-            *cache = None;
+        if let Ok(mut guard) = self.cached_hash.lock() {
+            *guard = None;
         }
+        // If the lock fails, that's okay - the hash will be recalculated when needed
     }
     
     /// Returns whether this node is a leaf node (has no children)
@@ -146,18 +147,23 @@ impl<K, V> TrieNode<K, V> {
     /// The hash is cached for future use, making subsequent calls efficient.
     pub fn hash(&self) -> u64 where K: Hash, V: Hash {
         // First check if we already have a cached hash
-        if let Ok(cache) = self.cached_hash.lock() {
-            if let Some(hash) = *cache {
-                return hash;
+        {
+            // Scope the lock guard to ensure it's released before heavy computation
+            if let Ok(guard) = self.cached_hash.lock() {
+                if let Some(hash) = *guard {
+                    return hash;
+                }
             }
+            // If we get here, either the lock failed or no hash was cached
+            // In either case, we'll calculate the hash
         }
         
-        // If not, calculate the hash
+        // Calculate the hash (with no locks held)
         let hash = self.calculate_hash();
         
         // Cache the result
-        if let Ok(mut cache) = self.cached_hash.lock() {
-            *cache = Some(hash);
+        if let Ok(mut guard) = self.cached_hash.lock() {
+            *guard = Some(hash);
         }
         
         hash
