@@ -1,19 +1,3 @@
-//! Utility functions for the radix trie implementation.
-//!
-//! This module contains helper functions for working with keys, bytes,
-//! and other common operations needed throughout the trie implementation.
-
-/// Converts a key into a vector of bytes.
-///
-/// For types that can be represented as byte slices (like strings or byte arrays),
-/// this simply returns the byte representation.
-pub fn key_to_bytes<K: ?Sized>(key: &K) -> Vec<u8>
-where
-    K: AsRef<[u8]>,
-{
-    key.as_ref().to_vec()
-}
-
 /// Finds the length of the common prefix between a key and a node's key fragment.
 ///
 /// Returns the number of bytes that match starting from the given offset.
@@ -29,21 +13,10 @@ pub fn prefix_match(key: &[u8], start_idx: usize, node_key: &[u8]) -> usize {
     i
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::hash::Hash;
-
-    #[test]
-    fn test_key_to_bytes() {
-        let key = "abc";
-        let bytes = key_to_bytes(key);
-
-        assert_eq!(bytes, b"abc");
-        assert_eq!(bytes.len(), 3);
-    }
 
     #[test]
     fn test_prefix_match() {
@@ -86,6 +59,4 @@ mod tests {
         // Different keys should have different hashes
         assert_ne!(hasher1.finish(), hasher3.finish());
     }
-    
-
 }

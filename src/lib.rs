@@ -15,10 +15,10 @@
 //! ## Example
 //!
 //! ```rust
-//! use radix_trie::Trie;
+//! use radix_trie::StringTrie;
 //!
 //! // Create a new trie
-//! let trie = Trie::<String, u32>::new();
+//! let trie = StringTrie::<i32>::new();
 //!
 //! // Insert some values (each operation returns a new trie)
 //! let trie = trie.insert("hello".to_string(), 1);
@@ -28,24 +28,47 @@
 //! assert_eq!(trie.get(&"hello".to_string()), Some(&1));
 //! ```
 
+pub mod key_converter;
 pub mod node;
 mod prefix_view;
 mod trie;
 mod util;
 
 // Re-export public types
+pub use crate::key_converter::{BytesKeyConverter, KeyToBytes, StrKeyConverter};
+pub use crate::node::TrieNode;
 pub use crate::prefix_view::PrefixView;
 pub use crate::trie::Trie;
-pub use crate::node::TrieNode;
+
+/// Type alias for a Trie that uses string keys
+pub type StringTrie<V> = Trie<String, V, StrKeyConverter<String>>;
+
+/// Type alias for a Trie that uses &str keys
+pub type StrTrie<'a, V> = Trie<&'a str, V, StrKeyConverter<&'a str>>;
+
+/// Type alias for a Trie that uses byte vector keys
+pub type BytesTrie<V> = Trie<Vec<u8>, V, BytesKeyConverter<Vec<u8>>>;
+
+/// Type alias for a Trie that uses any key type implementing AsRef<str>
+///
+/// This is useful for types like url::Url, std::path::PathBuf, etc.
+/// that implement AsRef<str> but may not directly implement AsRef<[u8]>
+pub type AsRefStrTrie<K, V> = Trie<K, V, StrKeyConverter<K>>;
+
+/// Type alias for a Trie that uses any key type implementing AsRef<[u8]>
+///
+/// This is useful for types that implement AsRef<[u8]> but not AsRef<str>,
+/// or for when you want to explicitly use byte-level operations.
+pub type AsRefBytesTrie<K, V> = Trie<K, V, BytesKeyConverter<K>>;
 
 /// PrefixView provides efficient views of subtries based on key prefixes.
 /// This enables fast comparison between subtries with the same prefix, as well
 /// as key lookups and existence checks.
 ///
 /// ```rust
-/// use radix_trie::Trie;
+/// use radix_trie::StringTrie;
 ///
-/// let trie = Trie::<String, u32>::new()
+/// let trie = StringTrie::<u32>::new()
 ///     .insert("hello".to_string(), 1)
 ///     .insert("help".to_string(), 2);
 ///
@@ -54,7 +77,7 @@ pub use crate::node::TrieNode;
 ///
 /// // Check if a key exists in the view
 /// assert!(view.contains_key(&"hello".to_string()));
-/// 
+///
 /// // Get a value from the view
 /// assert_eq!(view.get(&"hello".to_string()), Some(&1));
 /// ```
