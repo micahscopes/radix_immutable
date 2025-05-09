@@ -1,46 +1,34 @@
-Rust Radix Trie
+Radix Immutable
 ====
 
-[![Windows Build Status](https://ci.appveyor.com/api/projects/status/d2voj1te0m7agfne/branch/master?svg=true)](https://ci.appveyor.com/project/michaelsproul/rust-radix-trie/branch/master)
-
-This is a [Radix Trie][radix-wiki] implementation in Rust, building on the lessons learnt from `TrieMap` and [Sequence Trie][seq-trie]. You can read about my experience implementing this data structure [here][radix-paper].
-
-The crate provides two variants:
-1. A classic mutable radix trie implementation
-2. An immutable radix trie with structural sharing and fast prefix views for efficient comparison
-
-# Help Wanted, Enquire Within
-
-*Since writing this code I haven't used it in anger (or production) so it is no doubt in need of some maintenance, testing and optimisation love. If you would like to help out, try solving an open issue, optimise something, or just have a poke around! Thanks :)*
+This is a [Radix Trie][radix-wiki] implementation in Rust that focuses on immutability and efficient prefix operations. This started as a fork of the original `radix_trie` crate and was rewritten with the assistance of LLM tools.
 
 # Features
 
-* Compressed nodes. Common key prefixes are stored only once.
-* Trie-specific methods to look-up closest ancestors and descendants.
-* Key Generic. Any type that can be serialised as a vector of bytes can be used as a key.
-* Safe - no unsafe code.
-* Immutable implementation with structural sharing for efficient versioning.
-* Fast structural hashing for subtree comparison.
-* Prefix views for efficiently comparing subtries.
+* Immutable API with structural sharing for efficient versioning
+* Fast prefix comparison between trees
+* Compressed nodes with common key prefixes stored only once
+* Structural hashing for efficient subtree comparison
+* Key generic - supports any type that can be converted to bytes
+* Prefix views for efficiently querying and comparing subtries
+* Safe - no unsafe code
 
 # Documentation
 
-https://docs.rs/radix_trie/
+https://docs.rs/radix-immutable/
 
 # Usage
 
-Available on [Crates.io][] as [`radix_trie`][radix-crate].
+Available on [Crates.io][] as [`radix-immutable`][radix-immutable].
 
-Just add `radix_trie` to the dependencies section of your `Cargo.toml`, like so:
+Add `radix-immutable` to the dependencies section of your `Cargo.toml`:
 
 ```toml
 # Basic usage
-radix_trie = "0.2"
+radix-immutable = "0.1"
 ```
 
-# Contributors
-
-Made by:
+## Original `radix_trie` Contributors
 
 * Allan Simon ([@allan-simon](https://github.com/allan-simon))
 * Andrew Smith ([@andrewcsmith](https://github.com/andrewcsmith))
@@ -56,10 +44,10 @@ Made by:
 
 # License
 
-MIT License. Copyright © Michael Sproul and contributors 2015-present.
+MIT License. Copyright © Micah Fitch, Michael Sproul and contributors 2015-present.
 
 [radix-wiki]: http://en.wikipedia.org/wiki/Radix_tree
 [seq-trie]: https://github.com/michaelsproul/rust_sequence_trie
 [radix-paper]: https://michaelsproul.github.io/rust_radix_paper/
 [crates.io]: https://crates.io/
-[radix-crate]: https://crates.io/crates/radix_trie
+[radix-crate]: https://crates.io/crates/radix-immutable

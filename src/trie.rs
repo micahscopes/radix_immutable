@@ -183,24 +183,24 @@ impl<K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> Trie<K, V, KC> {
 
     /// Returns an iterator over all the key-value pairs in the trie.
     ///
-    /// The iterator yields pairs of `(&K, &V)` in depth-first order.
+    /// The iterator yields pairs of `(K, V)` (cloned values) in depth-first order.
     ///
     /// # Examples
     ///
     /// ```
-    /// use radix_trie::StringTrie;
+    /// use rust_radix_trie::Trie;
     /// use std::collections::HashSet;
     ///
-    /// let trie = StringTrie::<i32>::new()
-    ///     .insert("hello".to_string(), 1)
-    ///     .insert("world".to_string(), 2);
+    /// let mut trie = Trie::new();
+    /// trie.insert("hello".to_string(), 1);
+    /// trie.insert("world".to_string(), 2);
     ///
     /// let entries: HashSet<_> = trie.iter().collect();
     /// assert_eq!(entries.len(), 2);
-    /// assert!(entries.contains(&(&"hello".to_string(), &1)));
-    /// assert!(entries.contains(&(&"world".to_string(), &2)));
+    /// assert!(entries.contains(&("hello".to_string(), 1)));
+    /// assert!(entries.contains(&("world".to_string(), 2)));
     /// ```
-    pub fn iter(&self) -> TrieIter<'_, K, V, KC> {
+    pub fn iter(&self) -> TrieIter<K, V, KC> where V: Clone {
         let mut stack = VecDeque::new();
 
         // Start with the root node
@@ -211,24 +211,53 @@ impl<K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> Trie<K, V, KC> {
             _phantom: PhantomData,
         }
     }
+    
+    /// Returns an iterator over Arc references to the key-value pairs in the trie.
+    ///
+    /// The iterator yields pairs of `(Arc<K>, Arc<V>)` in depth-first order.
+    /// This avoids cloning the actual values but changes the return type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_radix_trie::Trie;
+    /// use std::sync::Arc;
+    ///
+    /// let mut trie = Trie::new();
+    /// trie.insert("hello".to_string(), 1);
+    /// trie.insert("world".to_string(), 2);
+    ///
+    /// for (key, value) in trie.iter_arc() {
+    ///     println!("{}: {}", key, value);
+    /// }
+    /// ```
+    pub fn iter_arc(&self) -> TrieArcIter<K, V, KC> {
+        let mut stack = VecDeque::new();
+
+        // Start with the root node
+        stack.push_back(Arc::clone(&self.root));
+
+        TrieArcIter {
+            stack,
+            _phantom: PhantomData,
+        }
+    }
 }
 
 /// An iterator over the entries of a Trie.
 ///
 /// This iterator performs a depth-first traversal of the trie and yields
-/// references to the keys and values.
-pub struct TrieIter<'a, K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> {
+/// cloned keys and values.
+pub struct TrieIter<K: Clone + Hash + Eq, V: Clone, KC: KeyToBytes<K>> {
     /// Stack of nodes to visit
     stack: VecDeque<Arc<TrieNode<K, V>>>,
 
-    /// Phantom data to tie the lifetime to the original trie
-    _phantom: PhantomData<&'a Trie<K, V, KC>>,
+    /// Phantom data for the key converter type
+    _phantom: PhantomData<KC>,
 }
 
-// The struct definition for TrieIter includes KC and bounds for K
-
-impl<'a, K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> Iterator for TrieIter<'a, K, V, KC> {
-    type Item = (&'a K, &'a V);
+impl<K: Clone + Hash + Eq, V: Clone, KC: KeyToBytes<K>> Iterator for TrieIter<K, V, KC> {
+    type Item = (K, V);
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(node) = self.stack.pop_front() {
@@ -240,12 +269,11 @@ impl<'a, K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> Iterator for TrieIter<'a, K
                 self.stack.push_front(Arc::clone(child));
             }
 
-            // If this node has a key-value pair, yield it
+            // If this node has a key-value pair, yield it (cloned)
             if let Some(kvp) = &node.data {
-                // Get references to key and value from KeyValuePair
-                // These references have the same lifetime as the original Trie
-                let key: &'a K = unsafe { std::mem::transmute(&*kvp.key) };
-                let value: &'a V = unsafe { std::mem::transmute(&*kvp.value) };
+                // Clone the key and value
+                let key = (*kvp.key).clone();
+                let value = (*kvp.value).clone();
 
                 return Some((key, value));
             }
@@ -255,9 +283,44 @@ impl<'a, K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> Iterator for TrieIter<'a, K
     }
 }
 
-impl<'a, K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> IntoIterator for &'a Trie<K, V, KC> {
-    type Item = (&'a K, &'a V);
-    type IntoIter = TrieIter<'a, K, V, KC>; // Updated to include KC
+/// An iterator over the entries of a Trie that returns Arc references.
+///
+/// This iterator performs a depth-first traversal of the trie and yields
+/// Arc references to the keys and values, avoiding cloning.
+pub struct TrieArcIter<K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> {
+    /// Stack of nodes to visit
+    stack: VecDeque<Arc<TrieNode<K, V>>>,
+
+    /// Phantom data for the key converter type
+    _phantom: PhantomData<KC>,
+}
+
+impl<K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> Iterator for TrieArcIter<K, V, KC> {
+    type Item = (Arc<K>, Arc<V>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(node) = self.stack.pop_front() {
+            // Add children to the stack (in reverse order for depth-first traversal)
+            let mut children: Vec<_> = node.children.iter().collect();
+            children.sort_by_key(|&(k, _)| k);
+
+            for (_, child) in children.into_iter().rev() {
+                self.stack.push_front(Arc::clone(child));
+            }
+
+            // If this node has a key-value pair, yield Arc references
+            if let Some(kvp) = &node.data {
+                return Some((Arc::clone(&kvp.key), Arc::clone(&kvp.value)));
+            }
+        }
+
+        None
+    }
+}
+
+impl<'a, K: Clone + Hash + Eq, V: Clone, KC: KeyToBytes<K>> IntoIterator for &'a Trie<K, V, KC> {
+    type Item = (K, V);
+    type IntoIter = TrieIter<K, V, KC>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()

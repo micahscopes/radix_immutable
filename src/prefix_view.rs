@@ -60,13 +60,25 @@ pub struct PrefixView<K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> {
 /// An iterator over the entries of a PrefixView.
 ///
 /// This iterator performs a depth-first traversal of the trie and yields
-/// references to the keys and values that match the prefix.
-pub struct PrefixViewIter<'a, K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> {
+/// cloned keys and values that match the prefix.
+pub struct PrefixViewIter<K: Clone + Hash + Eq, V: Clone, KC: KeyToBytes<K>> {
     /// Stack of nodes to visit, along with their parents (for backtracking)
     stack: VecDeque<(Arc<TrieNode<K, V>>, Vec<u8>)>,
 
-    /// The prefix view we're iterating over
-    view: &'a PrefixView<K, V, KC>,
+    /// The prefix view we're iterating over - owned to avoid lifetime issues
+    view: PrefixView<K, V, KC>,
+}
+
+/// Arc-based iterator over the key-value pairs in a prefix view.
+///
+/// This iterator performs a depth-first traversal of the trie and yields
+/// Arc references to the keys and values that match the prefix.
+pub struct PrefixViewArcIter<K: Clone + Hash + Eq, V, KC: KeyToBytes<K> + Clone> {
+    /// Stack of nodes to visit, along with their parents (for backtracking)
+    stack: VecDeque<(Arc<TrieNode<K, V>>, Vec<u8>)>,
+
+    /// The prefix view we're iterating over - owned to avoid lifetime issues
+    view: PrefixView<K, V, KC>,
 }
 
 impl<K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> PrefixView<K, V, KC>
@@ -148,11 +160,30 @@ where
 
     /// Returns an iterator over the key-value pairs in the prefix view.
     ///
-    /// The iterator yields pairs of `(&K, &V)` in depth-first order.
-    pub fn iter(&self) -> PrefixViewIter<'_, K, V, KC> {
-        let mut iter = PrefixViewIter::<'_, K, V, KC> {
+    /// The iterator yields pairs of `(K, V)` (cloned values) in depth-first order.
+    pub fn iter(&self) -> PrefixViewIter<K, V, KC> 
+    where V: Clone {
+        let mut iter = PrefixViewIter::<K, V, KC> {
             stack: VecDeque::new(),
-            view: self,
+            view: self.clone(),
+        };
+
+        // If the view has a subtrie node, add it to the stack
+        if let Some(node) = &self.subtrie_node {
+            iter.stack.push_back((Arc::clone(node), Vec::new()));
+        }
+
+        iter
+    }
+    
+    /// Returns an iterator over Arc references to the key-value pairs in the prefix view.
+    ///
+    /// The iterator yields pairs of `(Arc<K>, Arc<V>)` in depth-first order.
+    /// This avoids cloning the actual values but changes the return type.
+    pub fn iter_arc(&self) -> PrefixViewArcIter<K, V, KC> {
+        let mut iter = PrefixViewArcIter::<K, V, KC> {
+            stack: VecDeque::new(),
+            view: self.clone(),
         };
 
         // If the view has a subtrie node, add it to the stack
@@ -308,21 +339,17 @@ impl<K: Clone + Hash + Eq, V: Hash + Eq + Clone, KC: KeyToBytes<K>> PartialEq
 
 impl<K: Clone + Hash + Eq, V: Hash + Eq + Clone, KC: KeyToBytes<K>> Eq for PrefixView<K, V, KC> {}
 
-impl<'a, K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> IntoIterator for &'a PrefixView<K, V, KC>
-where
-    V: Clone,  // Needed by Trie::clone() which is used in PrefixView::new() via self.clone()
-    KC: Clone, // Needed by Trie::clone()
-{
-    type Item = (&'a K, &'a V);
-    type IntoIter = PrefixViewIter<'a, K, V, KC>;
+impl<'a, K: Clone + Hash + Eq, V: Clone, KC: KeyToBytes<K> + Clone> IntoIterator for &'a PrefixView<K, V, KC> {
+    type Item = (K, V);
+    type IntoIter = PrefixViewIter<K, V, KC>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
 
-impl<'a, K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> Iterator for PrefixViewIter<'a, K, V, KC> {
-    type Item = (&'a K, &'a V);
+impl<K: Clone + Hash + Eq, V: Clone, KC: KeyToBytes<K> + Clone> Iterator for PrefixViewIter<K, V, KC> {
+    type Item = (K, V);
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some((node, path)) = self.stack.pop_front() {
@@ -339,16 +366,18 @@ impl<'a, K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> Iterator for PrefixViewIter
                 self.stack.push_front((Arc::clone(child_node), child_path));
             }
 
-            // If this node has a key-value pair, yield it
+            // If this node has a key-value pair, yield it (cloned)
             if let Some(kvp) = &node.data {
-                // Get references to key and value from KeyValuePair
-                let key_ref: &'a K = unsafe { std::mem::transmute(&*kvp.key) };
-                let value_ref: &'a V = unsafe { std::mem::transmute(&*kvp.value) };
+                // Clone the key and value
+                let key = (*kvp.key).clone();
+                let value = (*kvp.value).clone();
 
                 // Make sure the key starts with our view's prefix
-                // This uses the iterator's internal helper which takes (&K, &K)
-                if Self::key_starts_with_prefix_iter_helper(key_ref, &self.view.prefix) {
-                    return Some((key_ref, value_ref));
+                let key_bytes = KC::convert(&key);
+                let prefix_bytes = KC::convert(&self.view.prefix);
+                
+                if key_bytes.starts_with(&prefix_bytes) {
+                    return Some((key, value));
                 }
                 // If the key doesn't match our prefix, continue checking other nodes
                 // This might happen if subtrie_node itself is for a prefix that is shorter than some keys it contains.
@@ -359,27 +388,44 @@ impl<'a, K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> Iterator for PrefixViewIter
     }
 }
 
-impl<'a, K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> PrefixViewIter<'a, K, V, KC> {
-    // Helper method to check if a key (&K) starts with a prefix (&K)
-    fn key_starts_with_prefix_iter_helper(key_k: &K, prefix_k: &K) -> bool {
-        let key_bytes = KC::convert(key_k);
-        let prefix_bytes = KC::convert(prefix_k);
+// Helper has been consolidated in the PrefixView struct
 
-        // Key must be at least as long as the prefix
-        if key_bytes.len() < prefix_bytes.len() {
-            return false;
-        }
+impl<K: Clone + Hash + Eq, V, KC: KeyToBytes<K>> Iterator for PrefixViewArcIter<K, V, KC> {
+    type Item = (Arc<K>, Arc<V>);
 
-        // Check each byte of the prefix
-        for (i, &prefix_byte) in prefix_bytes.iter().enumerate() {
-            if key_bytes[i] != prefix_byte {
-                return false;
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some((node, path)) = self.stack.pop_front() {
+            // Add children to the stack (in reverse order for depth-first traversal)
+            // Children are explored relative to the subtrie_node, path helps reconstruct full path if needed.
+            let mut children_to_visit: Vec<_> = node.children.iter().collect();
+            children_to_visit.sort_by_key(|&(k, _)| k); // Ensure deterministic order
+
+            for (branch_byte, child_node) in children_to_visit.into_iter().rev() {
+                // Store path info for potential future uses
+                let mut child_path = path.clone();
+                child_path.extend_from_slice(&node.key_fragment);
+                child_path.push(*branch_byte);
+                self.stack.push_front((Arc::clone(child_node), child_path));
+            }
+
+            // If this node has a key-value pair, yield it as Arc references
+            if let Some(kvp) = &node.data {
+                // Make sure the key starts with our view's prefix
+                let key_bytes = KC::convert(&*kvp.key);
+                let prefix_bytes = KC::convert(&self.view.prefix);
+                
+                // Simple prefix check
+                if key_bytes.starts_with(&prefix_bytes) {
+                    return Some((Arc::clone(&kvp.key), Arc::clone(&kvp.value)));
+                }
             }
         }
 
-        true
+        None
     }
 }
+
+// PrefixViewIter now uses the key_starts_with_prefix method from PrefixView directly
 
 #[cfg(test)]
 mod tests {
@@ -555,23 +601,26 @@ mod tests {
             )
         );
 
-        // Test the PrefixViewIter::key_starts_with_prefix_iter_helper(key_k: &K, prefix_k: &K)
+        // Test the key prefix matching functionality
         let hello_string = "hello".to_string();
         let hello_key_str = "hello".to_string();
         let he_string = "he".to_string();
         let help_string = "help".to_string();
 
-        assert!(PrefixViewIter::<String, u32, StrKeyConverter<String>>::key_starts_with_prefix_iter_helper(
+        assert!(PrefixView::<String, u32, StrKeyConverter<String>>::key_starts_with_prefix(
             &hello_string, &view_prefix_k_hel)
         );
-        assert!(PrefixViewIter::<String, u32, StrKeyConverter<String>>::key_starts_with_prefix_iter_helper(
-            &hello_string, &hello_key_str)
+        assert!(
+            PrefixView::<String, u32, StrKeyConverter<String>>::key_starts_with_prefix(
+                &hello_string, &hello_key_str)
         );
-        assert!(!PrefixViewIter::<String, u32, StrKeyConverter<String>>::key_starts_with_prefix_iter_helper(
-            &hello_string, &help_string)
+        assert!(
+            !PrefixView::<String, u32, StrKeyConverter<String>>::key_starts_with_prefix(
+                &hello_string, &help_string)
         );
-        assert!(!PrefixViewIter::<String, u32, StrKeyConverter<String>>::key_starts_with_prefix_iter_helper(
-            &he_string, &view_prefix_k_hel)
+        assert!(
+            !PrefixView::<String, u32, StrKeyConverter<String>>::key_starts_with_prefix(
+                &he_string, &view_prefix_k_hel)
         );
     }
 
@@ -586,29 +635,32 @@ mod tests {
         let view = PrefixView::new(trie.clone(), "hel".to_string());
 
         // Collect results into a set for easier comparison
-        let results: HashSet<(&String, &u32)> = view.iter().collect();
+        let results: HashSet<(String, u32)> = view.iter().collect();
 
-        // Create keys with proper ownership
-        let hello_key = "hello".to_string();
-        let help_key = "help".to_string();
-
-        // Expected results - convert to a HashSet for easier comparison
-        let expected: HashSet<(&String, &u32)> = vec![(&hello_key, &1), (&help_key, &2)]
-            .into_iter()
-            .collect();
+        // Expected results - these will be cloned values
+        let expected: HashSet<(String, u32)> = vec![
+            ("hello".to_string(), 1), 
+            ("help".to_string(), 2)
+        ].into_iter().collect();
 
         assert_eq!(results, expected);
 
+        // Also test the Arc-based iterator
+        let arc_results: Vec<(Arc<String>, Arc<u32>)> = view.iter_arc().collect();
+        assert_eq!(arc_results.len(), 2);
+        assert!(arc_results.iter().any(|(k, v)| **k == "hello" && **v == 1));
+        assert!(arc_results.iter().any(|(k, v)| **k == "help" && **v == 2));
+
         // View with a more specific prefix
         let view2 = PrefixView::new(trie.clone(), "hello".to_string());
-        let results2: Vec<(&String, &u32)> = view2.iter().collect();
+        let results2: Vec<(String, u32)> = view2.iter().collect();
 
         assert_eq!(results2.len(), 1);
-        assert_eq!(results2[0], (&hello_key, &1));
+        assert_eq!(results2[0], ("hello".to_string(), 1));
 
         // View with a prefix that doesn't match any keys
         let view3 = PrefixView::new(trie.clone(), "xyz".to_string());
-        let results3: Vec<(&String, &u32)> = view3.iter().collect();
+        let results3: Vec<(String, u32)> = view3.iter().collect();
 
         assert!(results3.is_empty());
     }
@@ -626,7 +678,7 @@ mod tests {
         let view = PrefixView::new(trie.clone(), "a".to_string());
 
         // Get results in order
-        let results: Vec<(&String, &u32)> = view.iter().collect();
+        let results: Vec<(String, u32)> = view.iter().collect();
 
         // Should have three items
         assert_eq!(results.len(), 3);
@@ -634,18 +686,25 @@ mod tests {
         // Just verify all expected elements are present.
         // Note: TrieIter sorts children by first byte before pushing to stack,
         // so it should be lexicographical.
-        let aa_key = "aa".to_string();
-        let ab_key = "ab".to_string();
-        let ac_key = "ac".to_string();
-        let ba_key = "ba".to_string(); // Should not be in "a" prefix view
-
-        assert!(results.contains(&(&aa_key, &1)));
-        assert!(results.contains(&(&ab_key, &2)));
-        assert!(results.contains(&(&ac_key, &3)));
-        assert!(!results.contains(&(&ba_key, &4)));
+        
+        assert!(results.contains(&("aa".to_string(), 1)));
+        assert!(results.contains(&("ab".to_string(), 2)));
+        assert!(results.contains(&("ac".to_string(), 3)));
+        assert!(!results.contains(&("ba".to_string(), 4)));
 
         // Explicitly check order for the "a" prefix view
-        let expected_a_results = vec![(&aa_key, &1), (&ab_key, &2), (&ac_key, &3)];
+        let expected_a_results = vec![
+            ("aa".to_string(), 1), 
+            ("ab".to_string(), 2), 
+            ("ac".to_string(), 3)
+        ];
         assert_eq!(results, expected_a_results);
+        
+        // Test the Arc-based iterator also maintains order
+        let arc_results: Vec<(Arc<String>, Arc<u32>)> = view.iter_arc().collect();
+        assert_eq!(arc_results.len(), 3);
+        assert_eq!(*arc_results[0].0, "aa".to_string());
+        assert_eq!(*arc_results[1].0, "ab".to_string());
+        assert_eq!(*arc_results[2].0, "ac".to_string());
     }
 }

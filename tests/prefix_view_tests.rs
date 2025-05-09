@@ -227,16 +227,15 @@ fn test_prefix_view_iter() {
     let view = trie.view_subtrie("hel".to_string());
 
     // Collect results into a set for easier comparison
-    let results: HashSet<(&String, &i32)> = view.iter().collect();
+    let results: HashSet<(String, i32)> = view.iter().collect();
 
     // Create keys with proper ownership
     let hello_key = "hello".to_string();
     let help_key = "help".to_string();
 
     // Expected results - convert to a HashSet for easier comparison
-    let expected: HashSet<(&String, &i32)> = vec![(&hello_key, &1), (&help_key, &2)]
-        .into_iter()
-        .collect();
+    let expected: HashSet<(String, i32)> =
+        vec![(hello_key, 1), (help_key, 2)].into_iter().collect();
 
     assert_eq!(results, expected);
 }
