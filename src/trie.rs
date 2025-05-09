@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::borrow::Borrow;
 use std::hash::Hash;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::node::TrieNode;
 use crate::prefix_view::PrefixView;
@@ -125,6 +125,92 @@ impl<K: AsRef<[u8]>, V> Trie<K, V> {
     {
         PrefixView::new(self.clone(), prefix)
     }
+    
+    /// Returns an iterator over all the key-value pairs in the trie.
+    ///
+    /// The iterator yields pairs of `(&K, &V)` in depth-first order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use radix_trie::Trie;
+    /// use std::collections::HashSet;
+    ///
+    /// let trie = Trie::<String, i32>::new()
+    ///     .insert("hello".to_string(), 1)
+    ///     .insert("world".to_string(), 2);
+    ///
+    /// let entries: HashSet<_> = trie.iter().collect();
+    /// assert_eq!(entries.len(), 2);
+    /// assert!(entries.contains(&(&"hello".to_string(), &1)));
+    /// assert!(entries.contains(&(&"world".to_string(), &2)));
+    /// ```
+    pub fn iter(&self) -> TrieIter<'_, K, V> {
+        let mut stack = VecDeque::new();
+        
+        // Start with the root node
+        stack.push_back(Arc::clone(&self.root));
+        
+        TrieIter {
+            stack,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+/// An iterator over the entries of a Trie.
+///
+/// This iterator performs a depth-first traversal of the trie and yields
+/// references to the keys and values.
+pub struct TrieIter<'a, K, V> {
+    /// Stack of nodes to visit
+    stack: VecDeque<Arc<TrieNode<K, V>>>,
+    
+    /// Phantom data to tie the lifetime to the original trie
+    _phantom: std::marker::PhantomData<&'a Trie<K, V>>,
+}
+
+impl<'a, K, V> Iterator for TrieIter<'a, K, V> 
+where
+    K: AsRef<[u8]>,
+{
+    type Item = (&'a K, &'a V);
+    
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(node) = self.stack.pop_front() {
+            // Add children to the stack (in reverse order for depth-first traversal)
+            let mut children: Vec<_> = node.children.iter().collect();
+            children.sort_by_key(|&(k, _)| k);
+            
+            for (_, child) in children.into_iter().rev() {
+                self.stack.push_front(Arc::clone(child));
+            }
+            
+            // If this node has a key-value pair, yield it
+            if let Some(kvp) = &node.data {
+                // Get references to key and value from KeyValuePair
+                // These references have the same lifetime as the original Trie
+                let key: &'a K = unsafe { std::mem::transmute(&*kvp.key) };
+                let value: &'a V = unsafe { std::mem::transmute(&*kvp.value) };
+                
+                return Some((key, value));
+            }
+        }
+        
+        None
+    }
+}
+
+impl<'a, K, V> IntoIterator for &'a Trie<K, V>
+where
+    K: AsRef<[u8]>,
+{
+    type Item = (&'a K, &'a V);
+    type IntoIter = TrieIter<'a, K, V>;
+    
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
 }
 
 impl<K, V> Trie<K, V> 
@@ -171,7 +257,7 @@ where
             
             // If there's nothing left, check if this node has a value
             if remaining.is_empty() {
-                return current.value.as_ref().map(|v| v.as_ref());
+                return current.data.as_ref().map(|kvp| kvp.value.as_ref());
             }
             
             // Otherwise, look for a child matching the next byte
@@ -187,7 +273,7 @@ where
         }
         
         // If we've consumed the entire key, return the value at this node (if any)
-        current.value.as_ref().map(|v| v.as_ref())
+        current.data.as_ref().map(|kvp| kvp.value.as_ref())
     }
     
     /// Returns `true` if the trie contains a value for the given key.
@@ -231,7 +317,7 @@ where
         let key_bytes = key_to_bytes(&key);
         
         // Call the recursive helper to perform the insertion with path copying
-        let (new_root, value_replaced) = self.insert_recursive(&self.root, &key_bytes, Arc::new(value));
+        let (new_root, value_replaced) = self.insert_recursive(&self.root, &key_bytes, key, value);
         
         // Calculate the new size
         let new_size = if value_replaced { self.size } else { self.size + 1 };
@@ -244,19 +330,22 @@ where
     }
     
     // Recursive helper for insert that handles path copying to allow for structural sharing
-    fn insert_recursive(&self, node: &Arc<TrieNode<K, V>>, key: &[u8], value: Arc<V>) -> (Arc<TrieNode<K, V>>, bool) {
-        if key.is_empty() {
+    fn insert_recursive(&self, node: &Arc<TrieNode<K, V>>, key_bytes: &[u8], original_key: K, value: V) -> (Arc<TrieNode<K, V>>, bool) {
+        if key_bytes.is_empty() {
             // We've reached the end of the key, create a new node with the value
             let mut new_node = TrieNode::new(node.key_fragment.clone());
             new_node.children = node.children.clone();
-            new_node.value = Some(value);
+            new_node.data = Some(crate::node::KeyValuePair {
+                key: Arc::new(original_key.clone()),
+                value: Arc::new(value.clone()),
+            });
             
             // Return the new node and whether we replaced a value
-            return (Arc::new(new_node), node.value.is_some());
+            return (Arc::new(new_node), node.data.is_some());
         }
         
         // Find how much of the key matches the current node's key fragment
-        let common_len = prefix_match(key, 0, &node.key_fragment);
+        let common_len = prefix_match(key_bytes, 0, &node.key_fragment);
         
         if common_len < node.key_fragment.len() {
             // The key and node's fragment share a prefix, but they diverge
@@ -266,7 +355,7 @@ where
             let remaining_fragment = node.key_fragment[common_len+1..].to_vec();
             let mut child = TrieNode::new(remaining_fragment);
             child.children = node.children.clone();
-            child.value = node.value.clone();
+            child.data = node.data.clone();
             
             // Create a new node map with the child
             let mut children = HashMap::new();
@@ -274,11 +363,14 @@ where
             children.insert(branch_byte, Arc::new(child));
             
             // If there's more of the key, create a new leaf node
-            if common_len < key.len() {
-                let new_key_fragment = key[common_len+1..].to_vec();
-                let mut leaf = TrieNode::new(new_key_fragment);
-                leaf.value = Some(value.clone());
-                let new_branch_byte = key[common_len];
+            if common_len < key_bytes.len() {
+                let key_fragment = key_bytes[common_len+1..].to_vec();
+                let mut leaf = TrieNode::new(key_fragment);
+                leaf.data = Some(crate::node::KeyValuePair {
+                    key: Arc::new(original_key.clone()),
+                    value: Arc::new(value.clone()),
+                });
+                let new_branch_byte = key_bytes[common_len];
                 children.insert(new_branch_byte, Arc::new(leaf));
             }
             
@@ -286,8 +378,11 @@ where
             let mut split_node = TrieNode::new(node.key_fragment[..common_len].to_vec());
             
             // If key is fully consumed at the split point, store the value
-            if common_len == key.len() {
-                split_node.value = Some(value.clone());
+            if common_len == key_bytes.len() {
+                split_node.data = Some(crate::node::KeyValuePair {
+                    key: Arc::new(original_key.clone()),
+                    value: Arc::new(value.clone()),
+                });
             }
             
             split_node.children = children;
@@ -297,15 +392,18 @@ where
         }
         
         // The key fragment was fully matched, now we need to handle the rest of the key
-        let remaining = &key[common_len..];
+        let remaining = &key_bytes[common_len..];
         
         if remaining.is_empty() {
             // We've matched the entire key, update the value at this node
             let mut new_node = TrieNode::new(node.key_fragment.clone());
             new_node.children = node.children.clone();
-            new_node.value = Some(value);
+            new_node.data = Some(crate::node::KeyValuePair {
+                key: Arc::new(original_key),
+                value: Arc::new(value),
+            });
             
-            return (Arc::new(new_node), node.value.is_some());
+            return (Arc::new(new_node), node.data.is_some());
         }
         
         // We have more key to process, go down the appropriate child
@@ -315,14 +413,14 @@ where
         match node.children.get(&next_byte) {
             Some(child) => {
                 // Recursively insert into the child
-                let (new_child, value_replaced) = self.insert_recursive(child, &remaining[1..], value.clone());
+                let (new_child, value_replaced) = self.insert_recursive(child, &remaining[1..], original_key, value);
                 
                 // Update the child in our children map
                 new_children.insert(next_byte, new_child);
                 
                 // Create a new node with the updated children
                 let mut new_node = TrieNode::new(node.key_fragment.clone());
-                new_node.value = node.value.clone();
+                new_node.data = node.data.clone();
                 new_node.children = new_children;
                 
                 return (Arc::new(new_node), value_replaced);
@@ -330,14 +428,14 @@ where
             None => {
                 // No matching child, add a new leaf for the remaining key
                 let leaf_fragment = remaining[1..].to_vec();
-                let new_leaf = TrieNode::with_value(leaf_fragment, (*value).clone());
+                let new_leaf = TrieNode::with_key_value(leaf_fragment, original_key, value);
                 
                 // Add the new leaf to the children map
                 new_children.insert(next_byte, Arc::new(new_leaf));
                 
                 // Create a new node with the updated children
                 let mut new_node = TrieNode::new(node.key_fragment.clone());
-                new_node.value = node.value.clone();
+                new_node.data = node.data.clone();
                 new_node.children = new_children;
                 
                 return (Arc::new(new_node), false);
@@ -367,11 +465,11 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized + AsRef<[u8]>,
     {
-        // Convert the key to bytes
         let key_bytes = key_to_bytes(key);
+        let mut removed_value = None;
         
-        // Use the recursive helper to perform the removal with path copying
-        let (new_root, removed_value) = self.remove_recursive(&self.root, &key_bytes);
+        // Call the recursive helper to perform the removal with path copying
+        let new_root = self.remove_recursive(&self.root, &key_bytes, &mut removed_value);
         
         // Calculate the new size
         let new_size = if removed_value.is_some() { self.size - 1 } else { self.size };
@@ -384,20 +482,24 @@ where
     }
     
     // Recursive helper for remove that handles path copying
-    fn remove_recursive(&self, node: &Arc<TrieNode<K, V>>, key: &[u8]) -> (Arc<TrieNode<K, V>>, Option<V>) {
+    fn remove_recursive(&self, node: &Arc<TrieNode<K, V>>, key: &[u8], removed_value: &mut Option<V>) -> Arc<TrieNode<K, V>> {
         if key.is_empty() {
             // We've reached the end of the key, remove the value if it exists
-            if node.value.is_none() {
+            if node.data.is_none() {
                 // No value to remove
-                return (Arc::clone(node), None);
+                return Arc::clone(node);
             }
             
-            // Create a new node without the value
+            // Create a new node without the data
             let mut new_node = TrieNode::new(node.key_fragment.clone());
             new_node.children = node.children.clone();
             
-            // Return the new node and the removed value
-            return (Arc::new(new_node), node.value.as_ref().map(|v| (**v).clone()));
+            // Store the removed value
+            if let Some(kvp) = &node.data {
+                *removed_value = Some((*kvp.value).clone());
+            }
+            
+            return Arc::new(new_node);
         }
         
         // Find how much of the key matches the current node's key fragment
@@ -406,7 +508,7 @@ where
         if common_len < node.key_fragment.len() {
             // The key doesn't match the node's fragment completely
             // This means the key doesn't exist in the trie
-            return (Arc::clone(node), None);
+            return Arc::clone(node);
         }
         
         // The key fragment was fully matched, now handle the remaining key
@@ -414,21 +516,26 @@ where
         
         if remaining.is_empty() {
             // We've reached the target node, remove its value
-            if node.value.is_none() {
+            if node.data.is_none() {
                 // No value to remove
-                return (Arc::clone(node), None);
+                return Arc::clone(node);
+            }
+            
+            // Store the removed value
+            if let Some(kvp) = &node.data {
+                *removed_value = Some((*kvp.value).clone());
             }
             
             // If this node has no children, it can be removed entirely
             if node.children.is_empty() {
-                return (Arc::new(TrieNode::new(Vec::new())), node.value.as_ref().map(|v| (**v).clone()));
+                return Arc::new(TrieNode::new(Vec::new()));
             }
             
             // Otherwise, create a new node without the value but with the same children
             let mut new_node = TrieNode::new(node.key_fragment.clone());
             new_node.children = node.children.clone();
             
-            return (Arc::new(new_node), node.value.as_ref().map(|v| (**v).clone()));
+            return Arc::new(new_node);
         }
         
         // We need to go deeper into the trie
@@ -437,18 +544,18 @@ where
         // Check if there's a child matching the next byte
         if let Some(child) = node.children.get(&next_byte) {
             // Recursively remove from the child
-            let (new_child, removed_value) = self.remove_recursive(child, &remaining[1..]);
+            let new_child = self.remove_recursive(child, &remaining[1..], removed_value);
             
             // If nothing was removed, return the original node
             if removed_value.is_none() {
-                return (Arc::clone(node), None);
+                return Arc::clone(node);
             }
             
             // Create a new children map for path copying
             let mut new_children = node.children.clone();
             
             // Check if the child should be completely removed or replaced
-            if new_child.key_fragment.is_empty() && new_child.children.is_empty() && new_child.value.is_none() {
+            if new_child.key_fragment.is_empty() && new_child.children.is_empty() && new_child.data.is_none() {
                 // Child is empty, remove it
                 new_children.remove(&next_byte);
             } else {
@@ -457,15 +564,15 @@ where
             }
             
             // If this node has no value and only one child after removal, we can merge them
-            if node.value.is_none() && new_children.len() == 1 {
+            if node.data.is_none() && new_children.len() == 1 {
                 let (only_byte, only_child) = new_children.iter().next().unwrap();
                 
                 // If the child has a value or multiple children, don't merge
-                if only_child.value.is_some() || only_child.children.len() > 1 {
+                if only_child.data.is_some() || only_child.children.len() > 1 {
                     // Create a new node with the updated children
                     let mut new_node = TrieNode::new(node.key_fragment.clone());
                     new_node.children = new_children;
-                    return (Arc::new(new_node), removed_value);
+                    return Arc::new(new_node);
                 }
                 
                 // Merge this node with its only child
@@ -475,21 +582,21 @@ where
                 
                 let mut merged_node = TrieNode::new(merged_fragment);
                 merged_node.children = only_child.children.clone();
-                merged_node.value = only_child.value.clone();
+                merged_node.data = only_child.data.clone();
                 
-                return (Arc::new(merged_node), removed_value);
+                return Arc::new(merged_node);
             }
             
             // Create a new node with the updated children
             let mut new_node = TrieNode::new(node.key_fragment.clone());
-            new_node.value = node.value.clone();
+            new_node.data = node.data.clone();
             new_node.children = new_children;
             
-            return (Arc::new(new_node), removed_value);
+            return Arc::new(new_node);
         }
         
         // No matching child, key doesn't exist in the trie
-        return (Arc::clone(node), None);
+        return Arc::clone(node);
     }
 }
 
@@ -507,18 +614,17 @@ where
     V: Hash + Eq + Clone,
 {
     fn eq(&self, other: &Self) -> bool {
-        // Fast path: check if they're the same instance
+        // Fast path: if it's the same instance or has the same root, it's equal
         if Arc::ptr_eq(&self.root, &other.root) {
             return true;
         }
         
-        // If sizes differ, they can't be equal
+        // If the size is different, it's definitely not equal
         if self.size != other.size {
             return false;
         }
         
-        // Compare structural hashes of the roots
-        // This is much faster than comparing every entry
+        // Compare the structural hashes of the roots
         self.root.hash() == other.root.hash()
     }
 }

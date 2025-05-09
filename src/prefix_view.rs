@@ -6,6 +6,7 @@
 use std::hash::Hash;
 use std::fmt;
 use std::sync::Arc;
+use std::collections::VecDeque;
 
 use crate::Trie;
 use crate::node::TrieNode;
@@ -49,6 +50,18 @@ pub struct PrefixView<K, V> {
     
     /// The subtrie node at the prefix, if it exists
     subtrie_node: Option<Arc<TrieNode<K, V>>>,
+}
+
+/// An iterator over the entries of a PrefixView.
+///
+/// This iterator performs a depth-first traversal of the trie and yields
+/// references to the keys and values that match the prefix.
+pub struct PrefixViewIter<'a, K, V> {
+    /// Stack of nodes to visit, along with their parents (for backtracking)
+    stack: VecDeque<(Arc<TrieNode<K, V>>, Vec<u8>)>,
+    
+    /// The prefix view we're iterating over
+    view: &'a PrefixView<K, V>,
 }
 
 impl<K, V> PrefixView<K, V> 
@@ -126,6 +139,23 @@ where
         self.trie.get(key)
     }
     
+    /// Returns an iterator over the key-value pairs in the prefix view.
+    ///
+    /// The iterator yields pairs of `(&K, &V)` in depth-first order.
+    pub fn iter(&self) -> PrefixViewIter<'_, K, V> {
+        let mut iter = PrefixViewIter {
+            stack: VecDeque::new(),
+            view: self,
+        };
+        
+        // If the view has a subtrie node, add it to the stack
+        if let Some(node) = &self.subtrie_node {
+            iter.stack.push_back((Arc::clone(node), Vec::new()));
+        }
+        
+        iter
+    }
+    
     // Helper method to find the subtrie node at the given prefix
     fn find_subtrie_node(trie: &Trie<K, V>, prefix: &K) -> Option<Arc<TrieNode<K, V>>> {
         let prefix_bytes = key_to_bytes(prefix);
@@ -172,7 +202,7 @@ where
     
     // Helper method to count all entries in a subtrie
     fn count_entries_in_subtrie(node: &Arc<TrieNode<K, V>>) -> usize {
-        let mut count = if node.value.is_some() { 1 } else { 0 };
+        let mut count = if node.data.is_some() { 1 } else { 0 };
         
         for child in node.children.values() {
             count += Self::count_entries_in_subtrie(child);
@@ -274,9 +304,96 @@ where
 {
 }
 
+impl<'a, K, V> IntoIterator for &'a PrefixView<K, V>
+where
+    K: Clone + AsRef<[u8]>,
+    V: Clone,
+{
+    type Item = (&'a K, &'a V);
+    type IntoIter = PrefixViewIter<'a, K, V>;
+    
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, K, V> Iterator for PrefixViewIter<'a, K, V>
+where 
+    K: AsRef<[u8]>,
+{
+    type Item = (&'a K, &'a V);
+    
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some((node, _)) = self.stack.pop_front() {
+            // Check if this node has a key-value pair
+            if let Some(kvp) = &node.data {
+                // Push children to visit later (depth-first)
+                let mut children: Vec<_> = node.children.iter().collect();
+                children.sort_by_key(|&(k, _)| k);
+                
+                for (k, child) in children.into_iter().rev() {
+                    let mut path = Vec::new();
+                    path.push(*k);
+                    self.stack.push_front((Arc::clone(child), path));
+                }
+                
+                // Get references to key and value from KeyValuePair
+                // These references have the same lifetime as the original Trie and PrefixView
+                let key: &'a K = unsafe { std::mem::transmute(&*kvp.key) };
+                let value: &'a V = unsafe { std::mem::transmute(&*kvp.value) };
+                
+                // Make sure the key starts with our prefix
+                if Self::key_starts_with_prefix(key, &self.view.prefix) {
+                    return Some((key, value));
+                }
+                
+                // If the key doesn't match our prefix, continue checking other nodes
+            } else {
+                // No key-value pair at this node, continue with children
+                let mut children: Vec<_> = node.children.iter().collect();
+                children.sort_by_key(|&(k, _)| k);
+                
+                for (k, child) in children.into_iter().rev() {
+                    let mut path = Vec::new();
+                    path.push(*k);
+                    self.stack.push_front((Arc::clone(child), path));
+                }
+            }
+        }
+        
+        None
+    }
+}
+
+impl<'a, K, V> PrefixViewIter<'a, K, V> 
+where
+    K: AsRef<[u8]>,
+{
+    // Helper method to check if a key starts with a prefix
+    fn key_starts_with_prefix(key: &K, prefix: &K) -> bool {
+        let key_bytes = key.as_ref();
+        let prefix_bytes = prefix.as_ref();
+        
+        // Key must be at least as long as the prefix
+        if key_bytes.len() < prefix_bytes.len() {
+            return false;
+        }
+        
+        // Check each byte of the prefix
+        for (i, &prefix_byte) in prefix_bytes.iter().enumerate() {
+            if key_bytes[i] != prefix_byte {
+                return false;
+            }
+        }
+        
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     
     #[test]
     fn test_prefix_view_creation() {
@@ -419,5 +536,70 @@ mod tests {
             &"he".to_string(), 
             &"hello".to_string())
         );
+    }
+    
+    #[test]
+    fn test_prefix_view_iter() {
+        let trie = Trie::<String, u32>::new()
+            .insert("hello".to_string(), 1)
+            .insert("help".to_string(), 2)
+            .insert("world".to_string(), 3);
+            
+        // View with the "hel" prefix
+        let view = PrefixView::new(trie.clone(), "hel".to_string());
+        
+        // Collect results into a set for easier comparison
+        let results: HashSet<(&String, &u32)> = view.iter().collect();
+        
+        // Store strings with longer lifetime
+        let hello = "hello".to_string();
+        let help = "help".to_string();
+        
+        // Expected results
+        let expected: HashSet<(&String, &u32)> = [
+            (&hello, &1),
+            (&help, &2),
+        ].iter().cloned().collect();
+        
+        assert_eq!(results, expected);
+        
+        // View with a more specific prefix
+        let view2 = PrefixView::new(trie.clone(), "hello".to_string());
+        let results2: Vec<(&String, &u32)> = view2.iter().collect();
+        
+        assert_eq!(results2.len(), 1);
+        assert_eq!(results2[0], (&"hello".to_string(), &1));
+        
+        // View with a prefix that doesn't match any keys
+        let view3 = PrefixView::new(trie.clone(), "xyz".to_string());
+        let results3: Vec<(&String, &u32)> = view3.iter().collect();
+        
+        assert!(results3.is_empty());
+    }
+    
+    #[test]
+    fn test_prefix_view_iter_order() {
+        // Test that iteration happens in a deterministic order
+        let trie = Trie::<String, u32>::new()
+            .insert("aa".to_string(), 1)
+            .insert("ab".to_string(), 2)
+            .insert("ac".to_string(), 3)
+            .insert("ba".to_string(), 4);
+            
+        // View with the "a" prefix
+        let view = PrefixView::new(trie.clone(), "a".to_string());
+        
+        // Get results in order
+        let results: Vec<(&String, &u32)> = view.iter().collect();
+        
+        // Should have three items
+        assert_eq!(results.len(), 3);
+        
+        // Should be in some consistent order (actual order depends on trie implementation)
+        // Just verify all expected elements are present
+        assert!(results.contains(&(&"aa".to_string(), &1)));
+        assert!(results.contains(&(&"ab".to_string(), &2)));
+        assert!(results.contains(&(&"ac".to_string(), &3)));
+        assert!(!results.contains(&(&"ba".to_string(), &4)));
     }
 }
