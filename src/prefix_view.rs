@@ -22,7 +22,7 @@ use crate::Trie;
 /// # Examples
 ///
 /// ```
-/// use radix_trie::{Trie, StrKeyConverter};
+/// use radix_immutable::{Trie, StrKeyConverter};
 ///
 /// let trie1 = Trie::<String, i32, StrKeyConverter<String>>::new_str_key()
 ///     .insert("hello".to_string(), 1)
@@ -86,6 +86,7 @@ where
     V: Clone,  // Trie::clone() requires V: Clone
     KC: Clone, // Trie::clone() requires KC: Clone (KeyToBytes already requires Clone)
 {
+
     /// Creates a new prefix view for the given trie and prefix.
     pub fn new(trie: Trie<K, V, KC>, prefix: K) -> Self {
         // Find the node corresponding to the prefix

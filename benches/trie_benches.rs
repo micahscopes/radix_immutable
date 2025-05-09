@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use radix_immutable::StrTrie;
+use radix_immutable::StringTrie;
 
 fn get_text() -> Vec<String> {
     use std::fs::File;
@@ -16,10 +16,10 @@ fn get_text() -> Vec<String> {
         .collect()
 }
 
-fn make_trie(words: &[String]) -> StrTrie<usize> {
-    let mut trie = StrTrie::new();
+fn make_trie(words: &[String]) -> StringTrie<String, usize> {
+    let mut trie = StringTrie::<String, usize>::new();
     for w in words {
-        trie = trie.insert(&w[..], w.len())
+        trie = trie.insert(w.clone(), w.len())
     }
     trie
 }
@@ -37,7 +37,7 @@ fn trie_get(b: &mut Criterion) {
         b.iter(|| {
             words
                 .iter()
-                .map(|w| trie.get(&&w[..]))
+                .map(|w| trie.get(w))
                 .collect::<Vec<Option<&usize>>>()
         })
     });
@@ -50,7 +50,7 @@ fn trie_insert_remove(b: &mut Criterion) {
         b.iter(|| {
             let mut trie = make_trie(&words);
             for w in &words {
-                (trie, _) = trie.remove(&&w[..]);
+                (trie, _) = trie.remove(w);
             }
         });
     });

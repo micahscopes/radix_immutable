@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 #[test]
 fn test_prefix_view_creation() {
-    let trie = StringTrie::<i32>::new()
+    let trie = StringTrie::<String, i32>::new()
         .insert("hello".to_string(), 1)
         .insert("help".to_string(), 2)
         .insert("world".to_string(), 3);
@@ -22,7 +22,7 @@ fn test_prefix_view_creation() {
 #[test]
 fn test_prefix_view_lexicographic_iteration() {
     // Create a trie with keys deliberately not in lexicographic order
-    let trie = StringTrie::<u32>::new()
+    let trie = StringTrie::<String, u32>::new()
         .insert("zebra".to_string(), 5)
         .insert("apple".to_string(), 1)
         .insert("banana".to_string(), 2)
@@ -65,7 +65,7 @@ fn test_prefix_view_lexicographic_iteration() {
     assert_eq!(b_keys, expected_b_keys);
 
     // Test with a multi-key prefix that includes part of some keys
-    let complex_trie = StringTrie::<u32>::new()
+    let complex_trie = StringTrie::<String, u32>::new()
         .insert("abcd".to_string(), 1)
         .insert("abce".to_string(), 2)
         .insert("abcf".to_string(), 3)
@@ -91,7 +91,7 @@ fn test_prefix_view_lexicographic_iteration() {
 
 #[test]
 fn test_prefix_view_nonexistent() {
-    let trie = StringTrie::<u32>::new()
+    let trie = StringTrie::<String, u32>::new()
         .insert("hello".to_string(), 1)
         .insert("world".to_string(), 2);
 
@@ -106,7 +106,7 @@ fn test_prefix_view_nonexistent() {
 #[test]
 fn test_prefix_view_subtree_equality() {
     // Create a trie with items at paths a, b, c
-    let trie1 = StringTrie::<u32>::new()
+    let trie1 = StringTrie::<String, u32>::new()
         .insert("a".to_string(), 1)
         .insert("b".to_string(), 2)
         .insert("c".to_string(), 3);
@@ -123,7 +123,7 @@ fn test_prefix_view_subtree_equality() {
     assert_ne!(view1, view3);
 
     // Create a trie with the same 'a' entry
-    let trie2 = StringTrie::<u32>::new()
+    let trie2 = StringTrie::<String, u32>::new()
         .insert("a".to_string(), 1)
         .insert("x".to_string(), 9)
         .insert("y".to_string(), 10);
@@ -136,7 +136,7 @@ fn test_prefix_view_subtree_equality() {
     assert_eq!(view1, view4);
 
     // But if the values are different, the views should not be equal
-    let trie3 = StringTrie::<u32>::new().insert("a".to_string(), 99); // Different value
+    let trie3 = StringTrie::<String, u32>::new().insert("a".to_string(), 99); // Different value
 
     let view5 = trie3.view_subtrie("a".to_string());
     assert_ne!(view1, view5);
@@ -152,11 +152,11 @@ fn test_prefix_view_subtree_equality() {
 #[test]
 fn test_prefix_view_equality() {
     // Create two tries with the same content
-    let trie1 = StringTrie::<i32>::new()
+    let trie1 = StringTrie::<String, i32>::new()
         .insert("hello".to_string(), 1)
         .insert("help".to_string(), 2);
 
-    let trie2 = StringTrie::<i32>::new()
+    let trie2 = StringTrie::<String, i32>::new()
         .insert("hello".to_string(), 1)
         .insert("help".to_string(), 2);
 
@@ -168,7 +168,7 @@ fn test_prefix_view_equality() {
     assert_eq!(view1, view2);
 
     // Create a trie with different content
-    let trie3 = StringTrie::<i32>::new()
+    let trie3 = StringTrie::<String, i32>::new()
         .insert("hello".to_string(), 99) // Different value
         .insert("help".to_string(), 2);
 
@@ -180,7 +180,7 @@ fn test_prefix_view_equality() {
 
 #[test]
 fn test_prefix_view_contains_key() {
-    let trie = StringTrie::<i32>::new()
+    let trie = StringTrie::<String, i32>::new()
         .insert("hello".to_string(), 1)
         .insert("help".to_string(), 2)
         .insert("world".to_string(), 3);
@@ -199,7 +199,7 @@ fn test_prefix_view_contains_key() {
 
 #[test]
 fn test_prefix_view_get() {
-    let trie = StringTrie::<i32>::new()
+    let trie = StringTrie::<String, i32>::new()
         .insert("hello".to_string(), 1)
         .insert("help".to_string(), 2)
         .insert("world".to_string(), 3);
@@ -218,7 +218,7 @@ fn test_prefix_view_get() {
 
 #[test]
 fn test_prefix_view_iter() {
-    let trie = StringTrie::<i32>::new()
+    let trie = StringTrie::<String, i32>::new()
         .insert("hello".to_string(), 1)
         .insert("help".to_string(), 2)
         .insert("world".to_string(), 3);
@@ -242,7 +242,7 @@ fn test_prefix_view_iter() {
 
 #[test]
 fn test_prefix_view_non_existent_prefix() {
-    let trie = StringTrie::<i32>::new()
+    let trie = StringTrie::<String, i32>::new()
         .insert("hello".to_string(), 1)
         .insert("help".to_string(), 2);
 
@@ -261,7 +261,7 @@ fn test_prefix_view_non_existent_prefix() {
 
 #[test]
 fn test_prefix_view_nested() {
-    let trie = StringTrie::<i32>::new()
+    let trie = StringTrie::<String, i32>::new()
         .insert("a".to_string(), 1)
         .insert("ab".to_string(), 2)
         .insert("abc".to_string(), 3)
@@ -292,7 +292,7 @@ fn test_prefix_view_nested() {
 
 #[test]
 fn test_prefix_view_empty_prefix() {
-    let trie = StringTrie::<i32>::new()
+    let trie = StringTrie::<String, i32>::new()
         .insert("hello".to_string(), 1)
         .insert("world".to_string(), 2);
 
@@ -307,7 +307,7 @@ fn test_prefix_view_empty_prefix() {
 
 #[test]
 fn test_prefix_view_cloning() {
-    let trie = StringTrie::<i32>::new()
+    let trie = StringTrie::<String, i32>::new()
         .insert("hello".to_string(), 1)
         .insert("help".to_string(), 2);
 

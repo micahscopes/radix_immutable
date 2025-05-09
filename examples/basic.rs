@@ -4,7 +4,7 @@ use radix_immutable::{StrKeyConverter, StringTrie, Trie};
 
 fn main() {
     // Create a new trie with string keys
-    let trie = StringTrie::<i32>::new();
+    let trie = StringTrie::<String, i32>::new();
 
     // Insert some values
     let trie = trie.insert("hello".to_string(), 1);
@@ -20,11 +20,17 @@ fn main() {
     let trie2 = trie2.insert("test".to_string(), 42);
 
     assert_eq!(trie2.get(&"test".to_string()), Some(&42));
+
+    // Or use the generic StringTrie that accepts any AsRef<str> key
+    let trie3 = StringTrie::<String, u32>::new();
+    let trie3 = trie3.insert("example".to_string(), 100);
+
+    assert_eq!(trie3.get(&"example".to_string()), Some(&100));
 }
 
 #[test]
 fn test_prefix_view() {
-    let trie = StringTrie::<i32>::new()
+    let trie = StringTrie::<String, i32>::new()
         .insert("hello".to_string(), 1)
         .insert("help".to_string(), 2)
         .insert("world".to_string(), 3);

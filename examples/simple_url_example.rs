@@ -1,10 +1,10 @@
 //! Simple example using url::Url as keys in a radix trie
-use radix_immutable::AsRefStrTrie;
+use radix_immutable::StringTrie;
 use url::Url;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a new trie for URL keys and string values
-    let mut url_trie = AsRefStrTrie::<Url, String>::new();
+    let mut url_trie = StringTrie::<Url, String>::new();
 
     // Create some example URLs
     let home = Url::parse("https://example.com/")?;

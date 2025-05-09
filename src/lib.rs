@@ -15,10 +15,10 @@
 //! ## Example
 //!
 //! ```rust
-//! use radix_trie::StringTrie;
+//! use radix_immutable::StringTrie;
 //!
 //! // Create a new trie
-//! let trie = StringTrie::<i32>::new();
+//! let trie = StringTrie::<String, i32>::new();
 //!
 //! // Insert some values (each operation returns a new trie)
 //! let trie = trie.insert("hello".to_string(), 1);
@@ -26,6 +26,36 @@
 //!
 //! // Lookup values
 //! assert_eq!(trie.get(&"hello".to_string()), Some(&1));
+//! ```
+//!
+//! You can also use custom types with a specialized key converter:
+//!
+//! ```rust
+//! use radix_immutable::{Trie, KeyToBytes};
+//! use std::path::{Path, PathBuf};
+//! use std::borrow::Cow;
+//! use std::marker::PhantomData;
+//!
+//! // Create a custom key converter for PathBuf
+//! #[derive(Clone, Debug)]
+//! struct PathKeyConverter<K>(PhantomData<K>);
+//!
+//! impl<K> Default for PathKeyConverter<K> {
+//!     fn default() -> Self {
+//!         Self(PhantomData)
+//!     }
+//! }
+//!
+//! impl<K: Clone + std::hash::Hash + Eq + AsRef<Path>> KeyToBytes<K> for PathKeyConverter<K> {
+//!     fn convert<'a>(key: &'a K) -> Cow<'a, [u8]> {
+//!         // Convert path to string and then to bytes
+//!         let path_str = key.as_ref().to_string_lossy();
+//!         Cow::Owned(path_str.as_bytes().to_vec())
+//!     }
+//! }
+//!
+//! // Create a trie that uses PathBuf as keys with our custom converter
+//! let trie = Trie::<PathBuf, i32, PathKeyConverter<PathBuf>>::new();
 //! ```
 
 pub mod key_converter;
@@ -37,38 +67,39 @@ mod util;
 // Re-export public types
 pub use crate::key_converter::{BytesKeyConverter, KeyToBytes, StrKeyConverter};
 pub use crate::node::TrieNode;
-pub use crate::prefix_view::PrefixView;
+pub use crate::prefix_view::{PrefixView, PrefixViewIter, PrefixViewArcIter};
 pub use crate::trie::Trie;
 
-/// Type alias for a Trie that uses string keys
-pub type StringTrie<V> = Trie<String, V, StrKeyConverter<String>>;
-
-/// Type alias for a Trie that uses &str keys
-pub type StrTrie<'a, V> = Trie<&'a str, V, StrKeyConverter<&'a str>>;
-
-/// Type alias for a Trie that uses byte vector keys
-pub type BytesTrie<V> = Trie<Vec<u8>, V, BytesKeyConverter<Vec<u8>>>;
-
-/// Type alias for a Trie that uses any key type implementing AsRef<str>
+/// Type alias for a Trie that uses string-based keys (anything implementing `AsRef<str>`)
 ///
-/// This is useful for types like url::Url, std::path::PathBuf, etc.
-/// that implement AsRef<str> but may not directly implement AsRef<[u8]>
-pub type AsRefStrTrie<K, V> = Trie<K, V, StrKeyConverter<K>>;
+/// This provides a convenient type for working with any keys that can be converted to strings.
+/// Examples of compatible types include: String, &str, PathBuf, Url, etc.
+pub type StringTrie<K, V> = Trie<K, V, StrKeyConverter<K>>;
 
-/// Type alias for a Trie that uses any key type implementing AsRef<[u8]>
+/// Type alias for a Trie that uses byte-based keys (anything implementing AsRef<[u8]>)
 ///
-/// This is useful for types that implement AsRef<[u8]> but not AsRef<str>,
-/// or for when you want to explicitly use byte-level operations.
-pub type AsRefBytesTrie<K, V> = Trie<K, V, BytesKeyConverter<K>>;
+/// This provides a convenient type for working with any keys that can be converted to byte slices.
+/// Examples of compatible types include: `Vec<u8>`, `&[u8]`, etc.
+pub type BytesTrie<K, V> = Trie<K, V, BytesKeyConverter<K>>;
+
+/// Type alias for a PrefixView of a StringTrie
+///
+/// This provides a convenient type for working with prefix views over string-based keys.
+pub type StringPrefixView<'a, K, V> = PrefixView<K, V, StrKeyConverter<K>>;
+
+/// Type alias for a PrefixView of a BytesTrie
+///
+/// This provides a convenient type for working with prefix views over byte-based keys.
+pub type BytesPrefixView<'a, K, V> = PrefixView<K, V, BytesKeyConverter<K>>;
 
 /// PrefixView provides efficient views of subtries based on key prefixes.
 /// This enables fast comparison between subtries with the same prefix, as well
 /// as key lookups and existence checks.
 ///
 /// ```rust
-/// use radix_trie::StringTrie;
+/// use radix_immutable::StringTrie;
 ///
-/// let trie = StringTrie::<u32>::new()
+/// let trie = StringTrie::<String, u32>::new()
 ///     .insert("hello".to_string(), 1)
 ///     .insert("help".to_string(), 2);
 ///
@@ -80,6 +111,21 @@ pub type AsRefBytesTrie<K, V> = Trie<K, V, BytesKeyConverter<K>>;
 ///
 /// // Get a value from the view
 /// assert_eq!(view.get(&"hello".to_string()), Some(&1));
+/// ```
+///
+/// PrefixView also works with various key types:
+///
+/// ```rust
+/// use radix_immutable::{StringTrie, StringPrefixView};
+///
+/// // Create a trie with string keys
+/// let trie = StringTrie::<String, i32>::new()
+///     .insert("hello".to_string(), 1)
+///     .insert("help".to_string(), 2);
+///
+/// // Create a prefix view of the trie
+/// let view = trie.view_subtrie("hel".to_string());
+/// assert_eq!(view.len(), 2);
 /// ```
 ///
 /// Errors that can occur in trie operations
