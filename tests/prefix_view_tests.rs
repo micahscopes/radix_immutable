@@ -1,4 +1,4 @@
-use radix_trie::{Trie, PrefixView};
+use radix_trie::Trie;
 
 #[test]
 fn test_prefix_view_creation() {
@@ -19,18 +19,151 @@ fn test_prefix_view_creation() {
 }
 
 #[test]
+fn test_prefix_view_lexicographic_iteration() {
+    // Create a trie with keys deliberately not in lexicographic order
+    let trie = Trie::<String, u32>::new()
+        .insert("zebra".to_string(), 5)
+        .insert("apple".to_string(), 1)
+        .insert("banana".to_string(), 2)
+        .insert("cherry".to_string(), 3)
+        .insert("date".to_string(), 4);
+    
+    // Create a view of the entire trie with empty prefix
+    let view = trie.view_subtrie(String::new());
+    
+    // Collect the keys in iteration order
+    let keys: Vec<String> = view.iter()
+        .map(|(k, _)| k.clone())
+        .collect();
+    
+    // Expected keys in lexicographic order
+    let expected = vec![
+        "apple".to_string(),
+        "banana".to_string(),
+        "cherry".to_string(),
+        "date".to_string(),
+        "zebra".to_string(),
+    ];
+    
+    // Verify that keys are returned in lexicographic order
+    assert_eq!(keys, expected);
+    
+    // Now test with a specific prefix
+    let b_view = trie.insert("berry".to_string(), 6)
+                     .view_subtrie("b".to_string());
+    
+    let b_keys: Vec<String> = b_view.iter()
+        .map(|(k, _)| k.clone())
+        .collect();
+    
+    let expected_b_keys = vec![
+        "banana".to_string(),
+        "berry".to_string(),
+    ];
+    
+    assert_eq!(b_keys, expected_b_keys);
+    
+    // Test with a multi-key prefix that includes part of some keys
+    let complex_trie = Trie::<String, u32>::new()
+        .insert("abcd".to_string(), 1)
+        .insert("abce".to_string(), 2)
+        .insert("abcf".to_string(), 3)
+        .insert("abdc".to_string(), 4)
+        .insert("abde".to_string(), 5);
+    
+    let complex_view = complex_trie.view_subtrie("abc".to_string());
+    
+    let complex_keys: Vec<String> = complex_view.iter()
+        .map(|(k, _)| k.clone())
+        .collect();
+    
+    let expected_complex_keys = vec![
+        "abcd".to_string(),
+        "abce".to_string(),
+        "abcf".to_string(),
+    ];
+    
+    assert_eq!(complex_keys, expected_complex_keys);
+}
+
+#[test]
 fn test_prefix_view_nonexistent() {
-    let trie = Trie::<String, i32>::new()
+    let trie = Trie::<String, u32>::new()
         .insert("hello".to_string(), 1)
-        .insert("help".to_string(), 2);
-        
-    // Create a view with a prefix that doesn't exist
+        .insert("world".to_string(), 2);
+    
     let view = trie.view_subtrie("xyz".to_string());
     
-    // Should not exist
     assert!(!view.exists());
     assert_eq!(view.len(), 0);
     assert!(view.is_empty());
+}
+
+#[test]
+fn test_prefix_view_subtree_equality() {
+    // Create a trie with items at paths a, b, c
+    let trie1 = Trie::<String, u32>::new()
+        .insert("a".to_string(), 1)
+        .insert("b".to_string(), 2)
+        .insert("c".to_string(), 3);
+    
+    // Get the view of subtrie at path "b"
+    let view_b1 = trie1.view_subtrie("b".to_string());
+    
+    // Check that view_b1 only contains one item
+    assert_eq!(view_b1.len(), 1);
+    assert!(view_b1.contains_key(&"b".to_string()));
+    assert!(!view_b1.contains_key(&"a".to_string()));
+    assert!(!view_b1.contains_key(&"c".to_string()));
+    
+    // Create a new trie with an added item at path "cc"
+    let trie2 = trie1.insert("cc".to_string(), 4);
+    
+    // Get the view of subtrie at path "b" from the new trie
+    let view_b2 = trie2.view_subtrie("b".to_string());
+    
+    // Check that view_b2 is equal to view_b1
+    // since adding "cc" doesn't affect the "b" subtree
+    assert_eq!(view_b1, view_b2);
+    
+    // Create a new trie with an added item at path "bb"
+    // which should affect the "b" subtree
+    let trie3 = trie1.insert("bb".to_string(), 5);
+    
+    // Get the view of subtrie at path "b" from this newest trie
+    let view_b3 = trie3.view_subtrie("b".to_string());
+    
+    // Check that view_b3 is different from view_b1 and view_b2
+    // since adding "bb" does affect the "b" subtree
+    assert_ne!(view_b1, view_b3);
+    assert_ne!(view_b2, view_b3);
+    
+    // Verify the content of view_b3
+    assert_eq!(view_b3.len(), 2); // Should contain "b" and "bb"
+    assert!(view_b3.contains_key(&"b".to_string()));
+    assert!(view_b3.contains_key(&"bb".to_string()));
+    assert!(!view_b3.contains_key(&"a".to_string()));
+    assert!(!view_b3.contains_key(&"c".to_string()));
+    assert!(!view_b3.contains_key(&"cc".to_string()));
+    
+    // Create a trie4 with all items
+    let trie4 = trie1
+        .insert("bb".to_string(), 5)
+        .insert("cc".to_string(), 4);
+    
+    // Views from different paths should not be equal
+    let view_a = trie4.view_subtrie("a".to_string());
+    let view_b = trie4.view_subtrie("b".to_string());
+    let view_c = trie4.view_subtrie("c".to_string());
+    
+    assert_ne!(view_a, view_b);
+    assert_ne!(view_a, view_c);
+    assert_ne!(view_b, view_c);
+    
+    // But views of the same subtree from different tries with 
+    // the same content in that subtree should be equal
+    let view_b_again = trie3.view_subtrie("b".to_string());
+    assert_eq!(view_b, view_b_again);
 }
 
 #[test]
