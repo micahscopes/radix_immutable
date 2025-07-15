@@ -162,8 +162,10 @@ where
     /// Returns an iterator over the key-value pairs in the prefix view.
     ///
     /// The iterator yields pairs of `(K, V)` (cloned values) in depth-first order.
-    pub fn iter(&self) -> PrefixViewIter<K, V, KC> 
-    where V: Clone {
+    pub fn iter(&self) -> PrefixViewIter<K, V, KC>
+    where
+        V: Clone,
+    {
         let mut iter = PrefixViewIter::<K, V, KC> {
             stack: VecDeque::new(),
             view: self.clone(),
@@ -340,7 +342,21 @@ impl<K: Clone + Hash + Eq, V: Hash + Eq + Clone, KC: KeyToBytes<K>> PartialEq
 
 impl<K: Clone + Hash + Eq, V: Hash + Eq + Clone, KC: KeyToBytes<K>> Eq for PrefixView<K, V, KC> {}
 
-impl<'a, K: Clone + Hash + Eq, V: Clone, KC: KeyToBytes<K> + Clone> IntoIterator for &'a PrefixView<K, V, KC> {
+impl<K: Clone + Hash + Eq, V: Hash + Eq + Clone, KC: KeyToBytes<K>> std::hash::Hash
+    for PrefixView<K, V, KC>
+{
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // For now, only hash the subtrie node to match current PartialEq behavior
+        match &self.subtrie_node {
+            Some(node) => node.hash().hash(state),
+            None => 0u64.hash(state), // Empty view
+        }
+    }
+}
+
+impl<'a, K: Clone + Hash + Eq, V: Clone, KC: KeyToBytes<K> + Clone> IntoIterator
+    for &'a PrefixView<K, V, KC>
+{
     type Item = (K, V);
     type IntoIter = PrefixViewIter<K, V, KC>;
 
@@ -349,7 +365,9 @@ impl<'a, K: Clone + Hash + Eq, V: Clone, KC: KeyToBytes<K> + Clone> IntoIterator
     }
 }
 
-impl<K: Clone + Hash + Eq, V: Clone, KC: KeyToBytes<K> + Clone> Iterator for PrefixViewIter<K, V, KC> {
+impl<K: Clone + Hash + Eq, V: Clone, KC: KeyToBytes<K> + Clone> Iterator
+    for PrefixViewIter<K, V, KC>
+{
     type Item = (K, V);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -608,20 +626,29 @@ mod tests {
         let he_string = "he".to_string();
         let help_string = "help".to_string();
 
-        assert!(PrefixView::<String, u32, StrKeyConverter<String>>::key_starts_with_prefix(
-            &hello_string, &view_prefix_k_hel)
+        assert!(
+            PrefixView::<String, u32, StrKeyConverter<String>>::key_starts_with_prefix(
+                &hello_string,
+                &view_prefix_k_hel
+            )
         );
         assert!(
             PrefixView::<String, u32, StrKeyConverter<String>>::key_starts_with_prefix(
-                &hello_string, &hello_key_str)
+                &hello_string,
+                &hello_key_str
+            )
         );
         assert!(
             !PrefixView::<String, u32, StrKeyConverter<String>>::key_starts_with_prefix(
-                &hello_string, &help_string)
+                &hello_string,
+                &help_string
+            )
         );
         assert!(
             !PrefixView::<String, u32, StrKeyConverter<String>>::key_starts_with_prefix(
-                &he_string, &view_prefix_k_hel)
+                &he_string,
+                &view_prefix_k_hel
+            )
         );
     }
 
@@ -639,10 +666,10 @@ mod tests {
         let results: HashSet<(String, u32)> = view.iter().collect();
 
         // Expected results - these will be cloned values
-        let expected: HashSet<(String, u32)> = vec![
-            ("hello".to_string(), 1), 
-            ("help".to_string(), 2)
-        ].into_iter().collect();
+        let expected: HashSet<(String, u32)> =
+            vec![("hello".to_string(), 1), ("help".to_string(), 2)]
+                .into_iter()
+                .collect();
 
         assert_eq!(results, expected);
 
@@ -695,9 +722,9 @@ mod tests {
 
         // Explicitly check order for the "a" prefix view
         let expected_a_results = vec![
-            ("aa".to_string(), 1), 
-            ("ab".to_string(), 2), 
-            ("ac".to_string(), 3)
+            ("aa".to_string(), 1),
+            ("ab".to_string(), 2),
+            ("ac".to_string(), 3),
         ];
         assert_eq!(results, expected_a_results);
         
